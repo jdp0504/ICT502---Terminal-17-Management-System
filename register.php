@@ -28,7 +28,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         if ($exists > 0) {
             $error_msg = "An account with this email already exists.";
         } else {
-            $ins = oci_parse($conn, "INSERT INTO CUSTOMER (customer_id, customer_name, gender, date_of_birth, email, phone_number, password) VALUES (:id, :name, :gender, TO_DATE(:dob, 'YYYY-MM-DD'), :email, :phone, :pass)");
+            $referral_email = trim($_POST['referral_email']);
+            $referred_by = null;
+            if ($referral_email !== '') {
+                $ref_q = oci_parse($conn, "SELECT CUSTOMER_ID FROM CUSTOMER WHERE LOWER(EMAIL) = LOWER(:email)");
+                oci_bind_by_name($ref_q, ':email', $referral_email);
+                oci_execute($ref_q);
+                if ($ref_r = oci_fetch_array($ref_q, OCI_ASSOC)) {
+                    $referred_by = intval($ref_r['CUSTOMER_ID']);
+                }
+                oci_free_statement($ref_q);
+            }
+            $ins = oci_parse($conn, "INSERT INTO CUSTOMER (customer_id, customer_name, gender, date_of_birth, email, phone_number, password, referred_by) VALUES (:id, :name, :gender, TO_DATE(:dob, 'YYYY-MM-DD'), :email, :phone, :pass, :ref)");
             oci_bind_by_name($ins, ':id', $customer_id);
             oci_bind_by_name($ins, ':name', $name);
             oci_bind_by_name($ins, ':gender', $gender);
@@ -36,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
             oci_bind_by_name($ins, ':email', $email);
             oci_bind_by_name($ins, ':phone', $phone);
             oci_bind_by_name($ins, ':pass', $password);
+            oci_bind_by_name($ins, ':ref', $referred_by);
 
             if (oci_execute($ins, OCI_COMMIT_ON_SUCCESS)) {
                 $success_msg = "Registration successful! You can now log in.";
@@ -62,10 +74,11 @@ oci_close($conn);
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #f0f2f5;
+            background: linear-gradient(135deg, #2563eb 0%, #1e3a5f 50%, #0f172a 100%);
             color: #1e293b;
             display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px 20px;
         }
+        .login-logo { display: block; margin: 0 auto 16px; max-width: 120px; height: auto; }
         .card {
             background: #fff; border-radius: 12px; padding: 36px; width: 100%; max-width: 480px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.06);
@@ -91,9 +104,11 @@ oci_close($conn);
         }
         .btn-primary { background: #2563eb; color: #fff; }
         .btn-primary:hover { background: #1d4ed8; }
-        .msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; text-align: center; }
+        .msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; text-align: center; position: relative; padding-right: 40px; }
         .msg-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
         .msg-success { background: #ecfdf5; color: #166534; border: 1px solid #bbf7d0; }
+        .msg-close { position: absolute; top: 8px; right: 10px; cursor: pointer; font-size: 18px; font-weight: 700; line-height: 1; opacity: .6; background: none; border: none; color: inherit; }
+        .msg-close:hover { opacity: 1; }
         .footer-text { text-align: center; font-size: 13px; color: #64748b; margin-top: 16px; }
         .footer-text a { color: #2563eb; font-weight: 600; }
         .footer-text a:hover { text-decoration: underline; }
@@ -101,11 +116,12 @@ oci_close($conn);
 </head>
 <body>
     <div class="card">
-        <h1>Terminal 17</h1>
+        <img src="img/t17-removebg-preview.png" alt="Terminal 17" class="login-logo">
+        <h1>Welcome to Terminal 17</h1>
         <p class="subtitle">Create your customer account</p>
 
-        <?php if ($error_msg) { echo "<div class=\"msg msg-error\">" . htmlspecialchars($error_msg) . "</div>"; } ?>
-        <?php if ($success_msg) { echo "<div class=\"msg msg-success\">" . htmlspecialchars($success_msg) . "</div>"; } ?>
+        <?php if ($error_msg) { echo '<div class="msg msg-error">' . htmlspecialchars($error_msg) . '<button class="msg-close" onclick="this.parentElement.remove()">×</button></div>'; } ?>
+        <?php if ($success_msg) { echo '<div class="msg msg-success">' . htmlspecialchars($success_msg) . '<button class="msg-close" onclick="this.parentElement.remove()">×</button></div>'; } ?>
 
         <form method="POST">
             <div class="form-group">
@@ -132,6 +148,10 @@ oci_close($conn);
             <div class="form-group">
                 <label>Phone Number</label>
                 <input type="text" name="phone_number" placeholder="e.g. 012-3456789" required>
+            </div>
+            <div class="form-group">
+                <label>Referred By (email) <span style="color:#94a3b8;font-weight:400;">optional</span></label>
+                <input type="email" name="referral_email" placeholder="e.g. admin@uitm.edu.my">
             </div>
             <div class="form-row">
                 <div class="form-group">

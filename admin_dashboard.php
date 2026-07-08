@@ -607,8 +607,11 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .empty { text-align: center; padding: 30px 10px; color: #94a3b8; font-size: 13px; }
 .msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
-.msg-success { background: #ecfdf5; color: #166534; border: 1px solid #bbf7d0; }
-.msg-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .msg-success { background: #ecfdf5; color: #166534; border: 1px solid #bbf7d0; }
+        .msg-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .msg { position: relative; padding-right: 40px; }
+        .msg-close { position: absolute; top: 8px; right: 10px; cursor: pointer; font-size: 18px; font-weight: 700; line-height: 1; opacity: .6; background: none; border: none; color: inherit; }
+        .msg-close:hover { opacity: 1; }
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; justify-content: center; align-items: center; }
 .modal-overlay.open { display: flex; }
 .modal { background: #fff; border-radius: 12px; padding: 28px; width: 90%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
@@ -653,7 +656,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
 
 <div class="main">
 
-    <?php if ($msg) { echo "<div class=\"msg msg-$msg_type\">" . htmlspecialchars($msg) . "</div>"; } ?>
+    <?php if ($msg) { echo "<div class=\"msg msg-$msg_type\">" . htmlspecialchars($msg) . "<button class=\"msg-close\" onclick=\"this.parentElement.remove()\">×</button></div>"; } ?>
 
     <!-- DASHBOARD -->
     <div id="section-dashboard" class="section <?php echo $active_section === 'dashboard' ? 'active' : ''; ?>">

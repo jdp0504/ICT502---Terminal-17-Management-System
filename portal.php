@@ -11,6 +11,14 @@ include('db.php');
 $customer_id = $_SESSION['customer_id'];
 $customer_name = $_SESSION['customer_name'];
 
+// Referred by
+$referred_by_name = '';
+$ref_q = oci_parse($conn, "SELECT r.CUSTOMER_NAME FROM CUSTOMER c JOIN CUSTOMER r ON c.REFERRED_BY = r.CUSTOMER_ID WHERE c.CUSTOMER_ID = :cid");
+oci_bind_by_name($ref_q, ':cid', $customer_id);
+oci_execute($ref_q);
+if ($ref_r = oci_fetch_array($ref_q, OCI_ASSOC)) { $referred_by_name = $ref_r['CUSTOMER_NAME']; }
+oci_free_statement($ref_q);
+
 // CSRF token
 if (empty($_SESSION['csrf_token'])) { $_SESSION['csrf_token'] = bin2hex(random_bytes(32)); }
 $csrf = $_SESSION['csrf_token'];
@@ -61,21 +69,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book_ticket'])) {
             $avail = $tseats - intval($cntr['C']);
             if ($avail <= 0) { $bk_msg = 'Sorry, no seats available on this trip.'; $bk_msg_type = 'error'; oci_rollback($conn); }
             else {
-                $nxt = oci_parse($conn, "SELECT NVL(MAX(BOOKING_ID), 0) + 1 AS N FROM BOOKING");
-                oci_execute($nxt, OCI_NO_AUTO_COMMIT);
-                $nxtr = oci_fetch_array($nxt, OCI_ASSOC);
-                $new_id = intval($nxtr['N']);
                 $fare = round($dist * 0.06, 2);
-                $ins = oci_parse($conn, "INSERT INTO BOOKING (BOOKING_ID, CUSTOMER_ID, SCHEDULE_ID, BOOKING_DATE_TIME, TOTAL_PASSENGER, TOTAL_FARE, BOOKING_STATUS) VALUES (:id, :cid, :sid, SYSDATE, :pc, :fare, 'Confirmed')");
+                $ins = oci_parse($conn, "INSERT INTO BOOKING (BOOKING_ID, CUSTOMER_ID, SCHEDULE_ID, BOOKING_DATE_TIME, TOTAL_PASSENGER, TOTAL_FARE, BOOKING_STATUS) VALUES (BOOKING_SEQ.NEXTVAL, :cid, :sid, SYSDATE, :pc, :fare, 'Confirmed')");
                 $pc = 1;
-                oci_bind_by_name($ins, ':id', $new_id);
                 oci_bind_by_name($ins, ':cid', $customer_id);
                 oci_bind_by_name($ins, ':sid', $schedule_id);
                 oci_bind_by_name($ins, ':pc', $pc);
                 oci_bind_by_name($ins, ':fare', $fare);
-                if (oci_execute($ins, OCI_NO_AUTO_COMMIT)) { oci_commit($conn); $bk_msg = "Booking #$new_id confirmed! Fare: RM$fare."; $bk_msg_type = 'success'; }
-                else { $e = oci_error($ins); $bk_msg = 'Error: ' . htmlentities($e['message']); $bk_msg_type = 'error'; oci_rollback($conn); }
-                oci_free_statement($ins); oci_free_statement($nxt);
+                if (oci_execute($ins, OCI_NO_AUTO_COMMIT)) {
+                    $cur = oci_parse($conn, "SELECT BOOKING_SEQ.CURRVAL FROM DUAL");
+                    oci_execute($cur, OCI_NO_AUTO_COMMIT);
+                    $cr = oci_fetch_array($cur, OCI_NUM);
+                    $new_id = intval($cr[0]);
+                    oci_free_statement($cur);
+                    oci_commit($conn);
+                    $bk_msg = "Booking #$new_id confirmed! Fare: RM$fare.";
+                    $bk_msg_type = 'success';
+                } else { $e = oci_error($ins); $bk_msg = 'Error: ' . htmlentities($e['message']); $bk_msg_type = 'error'; oci_rollback($conn); }
+                oci_free_statement($ins);
             }
             oci_free_statement($cnt); oci_free_statement($lk);
         }
@@ -302,7 +313,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['submit_complaint'])) $target_section = 'complaint';
     elseif (isset($_POST['report_item']) || isset($_POST['claim_item'])) $target_section = 'lostfound';
 }
-$default_section = $searched ? 'booking' : ($target_section ?: 'home');
+$default_section = $target_section ?: ($searched ? 'booking' : 'home');
 $ignore_hash = $target_section !== '' || $searched;
 
 oci_free_statement($stat_bk);
@@ -510,6 +521,9 @@ oci_free_statement($stat_sched);
         .msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
         .msg-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
         .msg-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .msg { position: relative; padding-right: 40px; }
+        .msg-close { position: absolute; top: 8px; right: 10px; cursor: pointer; font-size: 18px; font-weight: 700; line-height: 1; opacity: .6; background: none; border: none; color: inherit; }
+        .msg-close:hover { opacity: 1; }
 
         /* ── Driver Cards ── */
         .driver-card {
@@ -586,6 +600,7 @@ oci_free_statement($stat_sched);
         .route-card .route-meta { display: flex; justify-content: space-between; align-items: center; }
         .route-card .route-fare { font-size: 18px; font-weight: 700; color: #059669; }
         .route-card .route-bus { font-size: 11px; color: #94a3b8; }
+        .route-card .route-date { font-size: 11px; color: #64748b; white-space: nowrap; }
         .route-card .route-action { margin-top: 12px; }
 
         /* ── Features ── */
@@ -725,7 +740,7 @@ oci_free_statement($stat_sched);
             <a href="#" data-section="alerts" class="topnav-bell" title="Service Alerts">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             </a>
-            <span class="topnav-name"><?php echo htmlspecialchars(explode(' ', $customer_name)[0]); ?></span>
+            <span class="topnav-name"><?php echo htmlspecialchars(explode(' ', $customer_name)[0]); if ($referred_by_name) { echo ' <span style="font-size:11px;color:#94a3b8;font-weight:400;">(ref: ' . htmlspecialchars($referred_by_name) . ')</span>'; } ?></span>
             <a href="logout.php" class="topnav-logout">Sign Out</a>
         </div>
     </div>
@@ -804,7 +819,7 @@ oci_free_statement($stat_sched);
     <div id="section-booking" class="section">
         <div class="card">
             <h3><?php echo $i_ticket; ?>Search Bus Ticket Online</h3>
-            <?php if ($bk_msg) { echo '<div class="msg msg-' . $bk_msg_type . '">' . htmlspecialchars($bk_msg) . '</div>'; } ?>
+            <?php if ($bk_msg) { echo '<div class="msg msg-' . $bk_msg_type . '">' . htmlspecialchars($bk_msg) . '<button class="msg-close" onclick="this.parentElement.remove()">×</button></div>'; } ?>
             <form method="GET" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:20px;">
                 <div class="form-group" style="flex:1;min-width:160px;">
                     <label for="sd">From</label>
@@ -1040,6 +1055,7 @@ oci_free_statement($stat_sched);
                 $r_to = htmlspecialchars($pr['ARRIVAL_LOCATION']);
                 $r_fare = $pr['FARE'];
                 $r_bus = htmlspecialchars($pr['BUS_NUMBER']);
+                $r_date = htmlspecialchars($pr['NEXT_DEPART']);
             ?>
             <div class="route-card" onclick="showSection('booking')">
                 <div class="route-name"><?php echo $r_name; ?></div>
@@ -1047,6 +1063,7 @@ oci_free_statement($stat_sched);
                 <div class="route-meta">
                     <span class="route-fare">RM<?php echo $r_fare; ?></span>
                     <span class="route-bus">🚌 <?php echo $r_bus; ?></span>
+                    <span class="route-date"><?php echo $r_date; ?></span>
                 </div>
                 <div class="route-action"><span class="btn btn-primary btn-sm">Book Now →</span></div>
             </div>
@@ -1083,7 +1100,7 @@ oci_free_statement($stat_sched);
             <h3><?php echo $i_file; ?>File a Complaint</h3>
             <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
                 <div style="flex:1;min-width:300px;max-width:380px;">
-                    <?php if ($comp_msg) { echo '<div class="msg msg-' . $comp_msg_type . '">' . htmlspecialchars($comp_msg) . '</div>'; } ?>
+                    <?php if ($comp_msg) { echo '<div class="msg msg-' . $comp_msg_type . '">' . htmlspecialchars($comp_msg) . '<button class="msg-close" onclick="this.parentElement.remove()">×</button></div>'; } ?>
                     <form method="POST">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <div class="form-group">
@@ -1155,7 +1172,7 @@ oci_free_statement($stat_sched);
             <h3><?php echo $i_package; ?>Lost &amp; Found Center</h3>
             <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
                 <div style="flex:1;min-width:280px;max-width:340px;">
-                    <?php if ($lf_msg) { echo '<div class="msg msg-' . $lf_msg_type . '">' . htmlspecialchars($lf_msg) . '</div>'; } ?>
+                    <?php if ($lf_msg) { echo '<div class="msg msg-' . $lf_msg_type . '">' . htmlspecialchars($lf_msg) . '<button class="msg-close" onclick="this.parentElement.remove()">×</button></div>'; } ?>
                     <form method="POST">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <div class="form-group">
