@@ -531,10 +531,10 @@ while ($r = oci_fetch_array($chart_cc, OCI_ASSOC)) { $cc_labels[] = $r['COMPLAIN
 oci_free_statement($chart_cc);
 
 // Chart 3: Bookings by Route
-$chart_br = oci_parse($conn, "SELECT r.ROUTE_NAME, COUNT(*) AS CNT FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME ORDER BY CNT DESC");
+$chart_br = oci_parse($conn, "SELECT r.ROUTE_NAME, r.DEPARTURE_LOCATION, r.ARRIVAL_LOCATION, COUNT(*) AS CNT FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME, r.DEPARTURE_LOCATION, r.ARRIVAL_LOCATION ORDER BY CNT DESC");
 oci_execute($chart_br);
-$br_labels = []; $br_counts = [];
-while ($r = oci_fetch_array($chart_br, OCI_ASSOC)) { $br_labels[] = $r['ROUTE_NAME']; $br_counts[] = intval($r['CNT']); }
+$br_labels = []; $br_counts = []; $br_from = []; $br_to = [];
+while ($r = oci_fetch_array($chart_br, OCI_ASSOC)) { $br_labels[] = $r['ROUTE_NAME']; $br_counts[] = intval($r['CNT']); $br_from[] = $r['DEPARTURE_LOCATION']; $br_to[] = $r['ARRIVAL_LOCATION']; }
 oci_free_statement($chart_br);
 
 // Chart 4: Revenue by Route
@@ -1518,6 +1518,8 @@ new Chart(ccCtx, {
 // Chart 3: Bookings by Route (doughnut)
 var brCtx = document.getElementById('chartBookingsRoute').getContext('2d');
 var brColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#e11d48'];
+var brFrom = <?php echo json_encode($br_from); ?>;
+var brTo = <?php echo json_encode($br_to); ?>;
 new Chart(brCtx, {
     type: 'doughnut',
     data: {
@@ -1530,7 +1532,17 @@ new Chart(brCtx, {
     },
     options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } } }
+        plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        var idx = ctx.dataIndex;
+                        return ' ' + brFrom[idx] + ' → ' + brTo[idx] + ': ' + ctx.parsed + ' bookings';
+                    }
+                }
+            }
+        }
     }
 });
 // Chart 4: Revenue by Route (vertical bar)
