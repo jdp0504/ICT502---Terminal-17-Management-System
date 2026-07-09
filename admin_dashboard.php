@@ -27,6 +27,7 @@ $i_search = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=
 $i_route = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"/><line x1="8" y1="2" x2="8" y2="22"/></svg>';
 $i_hamburger = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
 $i_wrench = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+$i_dollar = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
 
 $peninsular_states = ['Johor','Kedah','Kelantan','Kuala Lumpur','Malacca','Negeri Sembilan','Pahang','Penang','Perak','Perlis','Putrajaya','Selangor','Shah Alam','Terengganu'];
 
@@ -528,6 +529,27 @@ oci_execute($chart_cc);
 $cc_labels = []; $cc_counts = [];
 while ($r = oci_fetch_array($chart_cc, OCI_ASSOC)) { $cc_labels[] = $r['COMPLAINT_CATEGORY']; $cc_counts[] = intval($r['CNT']); }
 oci_free_statement($chart_cc);
+
+// Chart 3: Bookings by Route
+$chart_br = oci_parse($conn, "SELECT r.ROUTE_NAME, COUNT(*) AS CNT FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME ORDER BY CNT DESC");
+oci_execute($chart_br);
+$br_labels = []; $br_counts = [];
+while ($r = oci_fetch_array($chart_br, OCI_ASSOC)) { $br_labels[] = $r['ROUTE_NAME']; $br_counts[] = intval($r['CNT']); }
+oci_free_statement($chart_br);
+
+// Chart 4: Revenue by Route
+$chart_rr = oci_parse($conn, "SELECT r.ROUTE_NAME, SUM(b.TOTAL_FARE) AS REVENUE FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME ORDER BY REVENUE DESC");
+oci_execute($chart_rr);
+$rr_labels = []; $rr_revenue = [];
+while ($r = oci_fetch_array($chart_rr, OCI_ASSOC)) { $rr_labels[] = $r['ROUTE_NAME']; $rr_revenue[] = floatval($r['REVENUE']); }
+oci_free_statement($chart_rr);
+
+// Chart 5: Driver Workload
+$chart_dw = oci_parse($conn, "SELECT d.DRIVER_NAME, COUNT(s.SCHEDULE_ID) AS CNT FROM DRIVER d LEFT JOIN SCHEDULE s ON d.DRIVER_ID = s.DRIVER_ID GROUP BY d.DRIVER_NAME ORDER BY CNT DESC");
+oci_execute($chart_dw);
+$dw_labels = []; $dw_counts = [];
+while ($r = oci_fetch_array($chart_dw, OCI_ASSOC)) { $dw_labels[] = $r['DRIVER_NAME']; $dw_counts[] = intval($r['CNT']); }
+oci_free_statement($chart_dw);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -660,14 +682,28 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
 
     <!-- DASHBOARD -->
     <div id="section-dashboard" class="section <?php echo $active_section === 'dashboard' ? 'active' : ''; ?>">
-        <div class="page-header"><h2>Analytics</h2><p>Booking trends and complaint breakdown</p></div>
-        <div class="card" style="padding:20px;margin-bottom:20px;">
-            <h3 style="margin-bottom:12px;"><?php echo $i_cal; ?>Monthly Bookings</h3>
-            <div style="position:relative;height:260px;"><canvas id="chartBookings"></canvas></div>
-        </div>
-        <div class="card" style="padding:20px;">
-            <h3 style="margin-bottom:12px;"><?php echo $i_file; ?>Complaints by Category</h3>
-            <div style="position:relative;height:260px;"><canvas id="chartComplaints"></canvas></div>
+        <div class="page-header"><h2>Analytics</h2><p>Booking trends, revenue, and operational insights</p></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <div class="card" style="padding:20px;">
+                <h3 style="margin-bottom:12px;"><?php echo $i_cal; ?>Monthly Bookings</h3>
+                <div style="position:relative;height:220px;"><canvas id="chartBookings"></canvas></div>
+            </div>
+            <div class="card" style="padding:20px;">
+                <h3 style="margin-bottom:12px;"><?php echo $i_file; ?>Complaints by Category</h3>
+                <div style="position:relative;height:220px;"><canvas id="chartComplaints"></canvas></div>
+            </div>
+            <div class="card" style="padding:20px;">
+                <h3 style="margin-bottom:12px;"><?php echo $i_route; ?>Bookings by Route</h3>
+                <div style="position:relative;height:220px;"><canvas id="chartBookingsRoute"></canvas></div>
+            </div>
+            <div class="card" style="padding:20px;">
+                <h3 style="margin-bottom:12px;"><?php echo $i_dollar; ?>Revenue by Route</h3>
+                <div style="position:relative;height:220px;"><canvas id="chartRevenue"></canvas></div>
+            </div>
+            <div class="card" style="padding:20px;">
+                <h3 style="margin-bottom:12px;"><?php echo $i_user; ?>Driver Workload</h3>
+                <div style="position:relative;height:220px;"><canvas id="chartDriverWorkload"></canvas></div>
+            </div>
         </div>
     </div>
 
@@ -1477,6 +1513,62 @@ new Chart(ccCtx, {
         indexAxis: 'y',
         plugins: { legend: { display: false } },
         scales: { x: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } } }
+    }
+});
+// Chart 3: Bookings by Route (doughnut)
+var brCtx = document.getElementById('chartBookingsRoute').getContext('2d');
+var brColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#e11d48'];
+new Chart(brCtx, {
+    type: 'doughnut',
+    data: {
+        labels: <?php echo json_encode($br_labels); ?>,
+        datasets: [{
+            data: <?php echo json_encode($br_counts); ?>,
+            backgroundColor: brColors.slice(0, <?php echo count($br_labels); ?>),
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } } }
+    }
+});
+// Chart 4: Revenue by Route (vertical bar)
+var rrCtx = document.getElementById('chartRevenue').getContext('2d');
+new Chart(rrCtx, {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode($rr_labels); ?>,
+        datasets: [{
+            label: 'Revenue (RM)',
+            data: <?php echo json_encode($rr_revenue); ?>,
+            backgroundColor: '#10b981',
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx) { return 'RM' + ctx.parsed.y.toFixed(2); } } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return 'RM' + v.toFixed(2); } } } }
+    }
+});
+// Chart 5: Driver Workload (vertical bar)
+var dwCtx = document.getElementById('chartDriverWorkload').getContext('2d');
+new Chart(dwCtx, {
+    type: 'bar',
+    data: {
+        labels: <?php echo json_encode($dw_labels); ?>,
+        datasets: [{
+            label: 'Schedules',
+            data: <?php echo json_encode($dw_counts); ?>,
+            backgroundColor: '#8b5cf6',
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } } }
     }
 });
 // ─── End Charts ───
