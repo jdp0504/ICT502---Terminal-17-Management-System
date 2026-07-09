@@ -538,10 +538,10 @@ while ($r = oci_fetch_array($chart_br, OCI_ASSOC)) { $br_labels[] = $r['ROUTE_NA
 oci_free_statement($chart_br);
 
 // Chart 4: Revenue by Route
-$chart_rr = oci_parse($conn, "SELECT r.ROUTE_NAME, SUM(b.TOTAL_FARE) AS REVENUE FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME ORDER BY REVENUE DESC");
+$chart_rr = oci_parse($conn, "SELECT r.ROUTE_NAME, r.DEPARTURE_LOCATION, r.ARRIVAL_LOCATION, SUM(b.TOTAL_FARE) AS REVENUE FROM BOOKING b JOIN SCHEDULE s ON b.SCHEDULE_ID = s.SCHEDULE_ID JOIN ROUTE r ON s.ROUTE_ID = r.ROUTE_ID GROUP BY r.ROUTE_NAME, r.DEPARTURE_LOCATION, r.ARRIVAL_LOCATION ORDER BY REVENUE DESC");
 oci_execute($chart_rr);
-$rr_labels = []; $rr_revenue = [];
-while ($r = oci_fetch_array($chart_rr, OCI_ASSOC)) { $rr_labels[] = $r['ROUTE_NAME']; $rr_revenue[] = floatval($r['REVENUE']); }
+$rr_labels = []; $rr_revenue = []; $rr_from = []; $rr_to = [];
+while ($r = oci_fetch_array($chart_rr, OCI_ASSOC)) { $rr_labels[] = $r['ROUTE_NAME']; $rr_revenue[] = floatval($r['REVENUE']); $rr_from[] = $r['DEPARTURE_LOCATION']; $rr_to[] = $r['ARRIVAL_LOCATION']; }
 oci_free_statement($chart_rr);
 
 // Chart 5: Driver Workload
@@ -1546,6 +1546,8 @@ new Chart(brCtx, {
     }
 });
 // Chart 4: Revenue by Route (vertical bar)
+var rrFrom = <?php echo json_encode($rr_from); ?>;
+var rrTo = <?php echo json_encode($rr_to); ?>;
 var rrCtx = document.getElementById('chartRevenue').getContext('2d');
 new Chart(rrCtx, {
     type: 'bar',
@@ -1560,7 +1562,20 @@ new Chart(rrCtx, {
     },
     options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx) { return 'RM' + ctx.parsed.y.toFixed(2); } } } },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    title: function(ctx) {
+                        var idx = ctx[0].dataIndex;
+                        return rrFrom[idx] + ' → ' + rrTo[idx];
+                    },
+                    label: function(ctx) {
+                        return 'Revenue: RM' + ctx.parsed.y.toFixed(2);
+                    }
+                }
+            }
+        },
         scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return 'RM' + v.toFixed(2); } } } }
     }
 });
