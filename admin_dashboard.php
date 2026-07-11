@@ -216,38 +216,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } }
         // Add driver
         elseif (isset($_POST['add_driver'])) {
-            $did = rand(10, 99);
+            $qid = oci_parse($conn, "SELECT NVL(MAX(DRIVER_ID), 0) + 1 AS NID FROM DRIVER");
+            oci_execute($qid);
+            $did = intval(oci_fetch_array($qid, OCI_ASSOC)['NID']);
+            oci_free_statement($qid);
             $name = trim($_POST['driver_name']);
             $gender = $_POST['gender'];
             $dob = $_POST['date_of_birth'];
             $email = trim($_POST['email']);
             $phone = trim($_POST['phone_number']);
-            $pass = trim($_POST['password']);
             $ic = trim($_POST['ic_number']);
             $lic = trim($_POST['license_number']);
             $exp = intval($_POST['experience_years']);
             $health = $_POST['health_status'];
             $safety = trim($_POST['safety_certification']);
             $emp = $_POST['employment_status'];
-            $q = oci_parse($conn, "INSERT INTO DRIVER (driver_id, driver_name, gender, date_of_birth, email, phone_number, password, ic_number, license_number, experience_years, health_status, safety_certification, employment_status) VALUES (:id, :n, :g, TO_DATE(:dob,'YYYY-MM-DD'), :e, :p, :pw, :ic, :lic, :exp, :h, :s, :emp)");
+            $dtype = $_POST['driver_type'] ?? 'Full-Time';
+            $q = oci_parse($conn, "INSERT INTO DRIVER (driver_id, driver_name, gender, date_of_birth, email, phone_number, ic_number, license_number, experience_years, health_status, safety_certification, employment_status, driver_type) VALUES (:id, :n, :g, TO_DATE(:dob,'YYYY-MM-DD'), :e, :p, :ic, :lic, :exp, :h, :s, :emp, :dt)");
             oci_bind_by_name($q, ':id', $did);
             oci_bind_by_name($q, ':n', $name);
             oci_bind_by_name($q, ':g', $gender);
             oci_bind_by_name($q, ':dob', $dob);
             oci_bind_by_name($q, ':e', $email);
             oci_bind_by_name($q, ':p', $phone);
-            oci_bind_by_name($q, ':pw', $pass);
             oci_bind_by_name($q, ':ic', $ic);
             oci_bind_by_name($q, ':lic', $lic);
             oci_bind_by_name($q, ':exp', $exp);
             oci_bind_by_name($q, ':h', $health);
             oci_bind_by_name($q, ':s', $safety);
             oci_bind_by_name($q, ':emp', $emp);
-            if (oci_execute($q, OCI_COMMIT_ON_SUCCESS)) {
+            oci_bind_by_name($q, ':dt', $dtype);
+            $ok = oci_execute($q, OCI_COMMIT_ON_SUCCESS);
+            oci_free_statement($q);
+            if ($ok) {
+                if ($dtype === 'Full-Time') {
+                    $salary = !empty($_POST['monthly_salary']) ? floatval($_POST['monthly_salary']) : null;
+                    $epf = trim($_POST['epf_number'] ?? '');
+                    $q2 = oci_parse($conn, "INSERT INTO FULLTIME_DRIVER (DRIVER_ID, MONTHLY_SALARY, EPF_NUMBER) VALUES (:id, :sal, :epf)");
+                    oci_bind_by_name($q2, ':id', $did);
+                    oci_bind_by_name($q2, ':sal', $salary);
+                    oci_bind_by_name($q2, ':epf', $epf);
+                    oci_execute($q2, OCI_COMMIT_ON_SUCCESS);
+                    oci_free_statement($q2);
+                } else {
+                    $rate = !empty($_POST['hourly_rate']) ? floatval($_POST['hourly_rate']) : null;
+                    $maxh = !empty($_POST['max_hours_week']) ? intval($_POST['max_hours_week']) : null;
+                    $q2 = oci_parse($conn, "INSERT INTO PARTTIME_DRIVER (DRIVER_ID, HOURLY_RATE, MAX_HOURS_WEEK) VALUES (:id, :rate, :maxh)");
+                    oci_bind_by_name($q2, ':id', $did);
+                    oci_bind_by_name($q2, ':rate', $rate);
+                    oci_bind_by_name($q2, ':maxh', $maxh);
+                    oci_execute($q2, OCI_COMMIT_ON_SUCCESS);
+                    oci_free_statement($q2);
+                }
                 $msg = "Driver '$name' added successfully.";
                 $msg_type = 'success';
             } else { $e = oci_error($q); $msg = 'Error: ' . htmlentities($e['message']); $msg_type = 'error'; }
-            oci_free_statement($q);
         }
         // Edit driver
         elseif (isset($_POST['edit_driver'])) {
@@ -261,7 +284,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $health = $_POST['health_status'];
             $safety = trim($_POST['safety_certification']);
             $emp = $_POST['employment_status'];
-            $q = oci_parse($conn, "UPDATE DRIVER SET DRIVER_NAME=:n, GENDER=:g, EMAIL=:e, PHONE_NUMBER=:p, LICENSE_NUMBER=:lic, EXPERIENCE_YEARS=:exp, HEALTH_STATUS=:h, SAFETY_CERTIFICATION=:s, EMPLOYMENT_STATUS=:emp WHERE DRIVER_ID=:id");
+            $dtype = $_POST['driver_type'] ?? 'Full-Time';
+            $q = oci_parse($conn, "UPDATE DRIVER SET DRIVER_NAME=:n, GENDER=:g, EMAIL=:e, PHONE_NUMBER=:p, LICENSE_NUMBER=:lic, EXPERIENCE_YEARS=:exp, HEALTH_STATUS=:h, SAFETY_CERTIFICATION=:s, EMPLOYMENT_STATUS=:emp, DRIVER_TYPE=:dt WHERE DRIVER_ID=:id");
             oci_bind_by_name($q, ':id', $did);
             oci_bind_by_name($q, ':n', $name);
             oci_bind_by_name($q, ':g', $gender);
@@ -272,7 +296,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             oci_bind_by_name($q, ':h', $health);
             oci_bind_by_name($q, ':s', $safety);
             oci_bind_by_name($q, ':emp', $emp);
+            oci_bind_by_name($q, ':dt', $dtype);
             if (oci_execute($q, OCI_COMMIT_ON_SUCCESS)) {
+                // Update subtype tables — delete old, insert new
+                $q1 = oci_parse($conn, "DELETE FROM FULLTIME_DRIVER WHERE DRIVER_ID = :id");
+                oci_bind_by_name($q1, ':id', $did);
+                oci_execute($q1);
+                oci_free_statement($q1);
+                $q1 = oci_parse($conn, "DELETE FROM PARTTIME_DRIVER WHERE DRIVER_ID = :id");
+                oci_bind_by_name($q1, ':id', $did);
+                oci_execute($q1);
+                oci_free_statement($q1);
+                if ($dtype === 'Full-Time') {
+                    $salary = !empty($_POST['monthly_salary']) ? floatval($_POST['monthly_salary']) : null;
+                    $epf = trim($_POST['epf_number'] ?? '');
+                    $q2 = oci_parse($conn, "INSERT INTO FULLTIME_DRIVER (DRIVER_ID, MONTHLY_SALARY, EPF_NUMBER) VALUES (:id, :sal, :epf)");
+                    oci_bind_by_name($q2, ':id', $did);
+                    oci_bind_by_name($q2, ':sal', $salary);
+                    oci_bind_by_name($q2, ':epf', $epf);
+                    oci_execute($q2, OCI_COMMIT_ON_SUCCESS);
+                    oci_free_statement($q2);
+                } else {
+                    $rate = !empty($_POST['hourly_rate']) ? floatval($_POST['hourly_rate']) : null;
+                    $maxh = !empty($_POST['max_hours_week']) ? intval($_POST['max_hours_week']) : null;
+                    $q2 = oci_parse($conn, "INSERT INTO PARTTIME_DRIVER (DRIVER_ID, HOURLY_RATE, MAX_HOURS_WEEK) VALUES (:id, :rate, :maxh)");
+                    oci_bind_by_name($q2, ':id', $did);
+                    oci_bind_by_name($q2, ':rate', $rate);
+                    oci_bind_by_name($q2, ':maxh', $maxh);
+                    oci_execute($q2, OCI_COMMIT_ON_SUCCESS);
+                    oci_free_statement($q2);
+                }
                 $msg = "Driver #$did updated.";
                 $msg_type = 'success';
             } else { $e = oci_error($q); $msg = 'Error: ' . htmlentities($e['message']); $msg_type = 'error'; }
@@ -477,7 +530,7 @@ while ($d = oci_fetch_array($driver_dd, OCI_ASSOC)) {
 oci_free_statement($driver_dd);
 
 // Drivers
-$driver_q = oci_parse($conn, "SELECT * FROM DRIVER ORDER BY DRIVER_NAME");
+$driver_q = oci_parse($conn, "SELECT d.*, ft.MONTHLY_SALARY, ft.EPF_NUMBER, pt.HOURLY_RATE, pt.MAX_HOURS_WEEK FROM DRIVER d LEFT JOIN FULLTIME_DRIVER ft ON d.DRIVER_ID = ft.DRIVER_ID LEFT JOIN PARTTIME_DRIVER pt ON d.DRIVER_ID = pt.DRIVER_ID ORDER BY d.DRIVER_NAME");
 oci_execute($driver_q);
 
 // Stats
@@ -1127,7 +1180,6 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                         <div class="form-group"><label>Phone</label><input type="text" name="phone_number" required></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label>Password</label><input type="password" name="password" placeholder="Login password" required></div>
                         <div class="form-group"><label>License #</label><input type="text" name="license_number" required></div>
                     </div>
                     <div class="form-row">
@@ -1138,6 +1190,22 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                         <div class="form-group"><label>Safety Certification</label><input type="text" name="safety_certification" placeholder="e.g. Certified"></div>
                         <div class="form-group"><label>Employment</label><select name="employment_status"><option value="Active">Active</option><option value="Suspended">Suspended</option><option value="Inactive">Inactive</option></select></div>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Driver Type</label>
+                            <select name="driver_type" id="add_driver_type" onchange="toggleAddDriverType()">
+                                <option value="Full-Time">Full-Time</option>
+                                <option value="Part-Time">Part-Time</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="add_ft_fields" class="form-row">
+                        <div class="form-group"><label>Monthly Salary (RM)</label><input type="number" step="0.01" name="monthly_salary" placeholder="e.g. 4000"></div>
+                        <div class="form-group"><label>EPF Number</label><input type="text" name="epf_number" placeholder="e.g. EPF-001"></div>
+                    </div>
+                    <div id="add_pt_fields" class="form-row" style="display:none;">
+                        <div class="form-group"><label>Hourly Rate (RM)</label><input type="number" step="0.01" name="hourly_rate" placeholder="e.g. 25"></div>
+                        <div class="form-group"><label>Max Hours/Week</label><input type="number" name="max_hours_week" placeholder="e.g. 30"></div>
+                    </div>
                     <button type="submit" name="add_driver" class="btn btn-success">Add Driver</button>
                 </form>
             </div>
@@ -1145,13 +1213,21 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                 <h3>Existing Drivers <span class="tag tag-green" style="margin-left:auto;"><?php echo $dc; ?> total</span></h3>
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>License</th><th>Health</th><th>Cert</th><th>Exp</th><th>Status</th><th>Action</th></tr></thead>
+                        <thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>License</th><th>Health</th><th>Cert</th><th>Exp</th><th>Status</th><th>Type</th><th>Details</th><th>Action</th></tr></thead>
                         <tbody>
                             <?php $has = false; while ($r = oci_fetch_array($driver_q, OCI_ASSOC)) { $has = true;
                                 $hs = strtolower($r['HEALTH_STATUS'] ?? '');
                                 $hc = $hs === 'fit' ? 'tag-green' : ($hs === 'unfit' ? 'tag-red' : 'tag-amber');
                                 $es = strtolower($r['EMPLOYMENT_STATUS'] ?? '');
                                 $ec = $es === 'active' ? 'tag-green' : 'tag-red';
+                                $dt = $r['DRIVER_TYPE'] ?? 'Full-Time';
+                                $dt_tag = $dt === 'Full-Time' ? 'tag-blue' : 'tag-amber';
+                                if ($dt === 'Full-Time') {
+                                    $detail = 'Salary: RM' . number_format(floatval($r['MONTHLY_SALARY'] ?? 0), 2) . ', EPF: ' . htmlspecialchars($r['EPF_NUMBER'] ?? '—');
+                                } else {
+                                    $detail = 'Rate: RM' . number_format(floatval($r['HOURLY_RATE'] ?? 0), 2) . '/hr, Max: ' . ($r['MAX_HOURS_WEEK'] ?? '—') . ' hrs/wk';
+                                }
+                                $detail_js = htmlspecialchars(addslashes($detail));
                             ?>
                             <tr>
                                 <td>#<?php echo $r['DRIVER_ID']; ?></td>
@@ -1162,8 +1238,10 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                                 <td><?php echo htmlspecialchars($r['SAFETY_CERTIFICATION'] ?? '—'); ?></td>
                                 <td><?php echo $r['EXPERIENCE_YEARS']; ?> yrs</td>
                                 <td><span class="tag <?php echo $ec; ?>"><?php echo htmlspecialchars($r['EMPLOYMENT_STATUS']); ?></span></td>
+                                <td><span class="tag <?php echo $dt_tag; ?>"><?php echo $dt; ?></span></td>
+                                <td style="font-size:11px;max-width:180px;"><?php echo $detail; ?></td>
                                 <td>
-                                    <button class="btn btn-outline btn-sm" onclick="editDriver(<?php echo $r['DRIVER_ID']; ?>, '<?php echo htmlspecialchars(addslashes($r['DRIVER_NAME'])); ?>', '<?php echo htmlspecialchars(addslashes($r['GENDER'])); ?>', '<?php echo htmlspecialchars(addslashes($r['EMAIL'])); ?>', '<?php echo htmlspecialchars(addslashes($r['PHONE_NUMBER'])); ?>', '<?php echo htmlspecialchars(addslashes($r['LICENSE_NUMBER'])); ?>', <?php echo $r['EXPERIENCE_YEARS']; ?>, '<?php echo htmlspecialchars(addslashes($r['HEALTH_STATUS'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($r['SAFETY_CERTIFICATION'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($r['EMPLOYMENT_STATUS'])); ?>')">Edit</button>
+                                    <button class="btn btn-outline btn-sm" onclick="editDriver(<?php echo $r['DRIVER_ID']; ?>, '<?php echo htmlspecialchars(addslashes($r['DRIVER_NAME'])); ?>', '<?php echo htmlspecialchars(addslashes($r['GENDER'])); ?>', '<?php echo htmlspecialchars(addslashes($r['EMAIL'])); ?>', '<?php echo htmlspecialchars(addslashes($r['PHONE_NUMBER'])); ?>', '<?php echo htmlspecialchars(addslashes($r['LICENSE_NUMBER'])); ?>', <?php echo $r['EXPERIENCE_YEARS']; ?>, '<?php echo htmlspecialchars(addslashes($r['HEALTH_STATUS'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($r['SAFETY_CERTIFICATION'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($r['EMPLOYMENT_STATUS'])); ?>', '<?php echo htmlspecialchars(addslashes($dt)); ?>', <?php echo floatval($r['MONTHLY_SALARY'] ?? 0); ?>, '<?php echo htmlspecialchars(addslashes($r['EPF_NUMBER'] ?? '')); ?>', <?php echo floatval($r['HOURLY_RATE'] ?? 0); ?>, <?php echo intval($r['MAX_HOURS_WEEK'] ?? 0); ?>)">Edit</button>
                                     <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this driver?');">
                                         <input type="hidden" name="_section" value="drivers">
                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
@@ -1172,7 +1250,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                                     </form>
                                 </td>
                             </tr>
-                            <?php } if (!$has) { echo '<tr><td colspan="9"><div class="empty">No drivers registered.</div></td></tr>'; } ?>
+                            <?php } if (!$has) { echo '<tr><td colspan="11"><div class="empty">No drivers registered.</div></td></tr>'; } ?>
                         </tbody>
                     </table>
                 </div>
@@ -1309,6 +1387,22 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: #3b82f6
                 <div class="form-group"><label>Safety Cert</label><input type="text" name="safety_certification" id="ed_safety"></div>
             </div>
             <div class="form-group"><label>Employment</label><select name="employment_status" id="ed_emp"><option value="Active">Active</option><option value="Suspended">Suspended</option><option value="Inactive">Inactive</option></select></div>
+            <div class="form-row">
+                <div class="form-group"><label>Driver Type</label>
+                    <select name="driver_type" id="ed_driver_type" onchange="toggleEditDriverType()">
+                        <option value="Full-Time">Full-Time</option>
+                        <option value="Part-Time">Part-Time</option>
+                    </select>
+                </div>
+            </div>
+            <div id="ed_ft_fields" class="form-row">
+                <div class="form-group"><label>Monthly Salary (RM)</label><input type="number" step="0.01" name="monthly_salary" id="ed_salary" placeholder="e.g. 4000"></div>
+                <div class="form-group"><label>EPF Number</label><input type="text" name="epf_number" id="ed_epf" placeholder="e.g. EPF-001"></div>
+            </div>
+            <div id="ed_pt_fields" class="form-row" style="display:none;">
+                <div class="form-group"><label>Hourly Rate (RM)</label><input type="number" step="0.01" name="hourly_rate" id="ed_rate" placeholder="e.g. 25"></div>
+                <div class="form-group"><label>Max Hours/Week</label><input type="number" name="max_hours_week" id="ed_maxh" placeholder="e.g. 30"></div>
+            </div>
             <button type="submit" name="edit_driver" class="btn btn-primary">Save Changes</button>
         </form>
     </div>
@@ -1410,7 +1504,7 @@ function editRoute(id, name, dep, arr, dist, dur) {
     document.getElementById('er_dur').value = dur;
     document.getElementById('editRouteModal').classList.add('open');
 }
-function editDriver(id, name, gender, email, phone, lic, exp, health, safety, emp) {
+function editDriver(id, name, gender, email, phone, lic, exp, health, safety, emp, dtype, ftSal, ftEpf, ptRate, ptMaxh) {
     document.getElementById('ed_id').value = id;
     document.getElementById('ed_name').value = name;
     document.getElementById('ed_gender').value = gender;
@@ -1421,8 +1515,25 @@ function editDriver(id, name, gender, email, phone, lic, exp, health, safety, em
     document.getElementById('ed_health').value = health;
     document.getElementById('ed_safety').value = safety;
     document.getElementById('ed_emp').value = emp;
+    document.getElementById('ed_driver_type').value = dtype;
+    document.getElementById('ed_salary').value = ftSal || '';
+    document.getElementById('ed_epf').value = ftEpf || '';
+    document.getElementById('ed_rate').value = ptRate || '';
+    document.getElementById('ed_maxh').value = ptMaxh || '';
+    toggleEditDriverType();
     document.getElementById('editDriverModal').classList.add('open');
 }
+function toggleAddDriverType() {
+    var t = document.getElementById('add_driver_type').value;
+    document.getElementById('add_ft_fields').style.display = (t === 'Full-Time') ? '' : 'none';
+    document.getElementById('add_pt_fields').style.display = (t === 'Part-Time') ? '' : 'none';
+}
+function toggleEditDriverType() {
+    var t = document.getElementById('ed_driver_type').value;
+    document.getElementById('ed_ft_fields').style.display = (t === 'Full-Time') ? '' : 'none';
+    document.getElementById('ed_pt_fields').style.display = (t === 'Part-Time') ? '' : 'none';
+}
+toggleAddDriverType();
 function editBus(id, driverId, number, seats, status) {
     document.getElementById('eb_id').value = id;
     document.getElementById('eb_driver').value = driverId;
